@@ -10,18 +10,18 @@
 <body class="bg-slate-50 p-4 font-sans text-slate-800">
 
     <header class="text-center mb-6">
-        <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Contabilidad Toñita Corinto</h1>
-        <div id="status" class="text-[10px] text-orange-500 font-bold uppercase">Conectando a la nube...</div>
+        <h1 class="text-2xl font-bold text-slate-800 tracking-tight text-center">Contabilidad Compartida</h1>
+        <div id="status" class="text-[10px] text-orange-500 font-bold uppercase text-center">Conectando a la nube...</div>
     </header>
 
     <div class="grid grid-cols-2 gap-4 mb-6">
         <div class="bg-emerald-600 rounded-2xl p-4 shadow-lg text-white">
             <p class="text-[10px] uppercase font-bold opacity-80 tracking-widest">Total Ventas</p>
-            <h2 id="totalVentas" class="text-xl font-black mt-1">$0.00</h2>
+            <h2 id="totalVentas" class="text-xl font-black mt-1 text-white">$0.00</h2>
         </div>
         <div class="bg-slate-800 rounded-2xl p-4 shadow-lg text-white">
             <p class="text-[10px] uppercase font-bold opacity-80 tracking-widest">Total Compras CF</p>
-            <h2 id="totalCompras" class="text-xl font-black mt-1">$0.00</h2>
+            <h2 id="totalCompras" class="text-xl font-black mt-1 text-white">$0.00</h2>
         </div>
     </div>
 
@@ -48,13 +48,14 @@
                 📊 EXCEL
             </button>
         </div>
+        <button onclick="borrarTodoNube()" class="w-full mt-4 text-[10px] text-red-400 font-bold uppercase tracking-widest text-center">Limpiar base de datos (Nube)</button>
     </div>
 
     <div id="listaContenedor" class="space-y-3 pb-10"></div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, deleteDoc, updateDoc, writeBatch, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAqfr2LvgnEN9-ZOaJwMcqIaqCOEaSfD8o",
@@ -68,12 +69,12 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const colRef = collection(db, "movimientos");
+        const PIN_SEGURIDAD = "1234"; 
 
         let registros = [];
         let tipoSeleccionado = 'Venta';
         let editandoId = null;
 
-        // --- FUNCIONES ACCESIBLES DESDE EL HTML ---
         window.setTipo = (tipo) => {
             tipoSeleccionado = tipo;
             const bVenta = document.getElementById('btnVenta');
@@ -87,7 +88,7 @@
             const nota = document.getElementById('nota').value;
             const user = document.getElementById('usuario').value || "Anónimo";
 
-            if (!monto) return alert("Ingresa un monto");
+            if (!monto) return alert("Ingresa un monto, parce.");
 
             try {
                 if (editandoId) {
@@ -96,12 +97,10 @@
                     });
                     editandoId = null;
                     document.getElementById('btnGuardar').innerText = "Registrar en la Nube";
+                    document.getElementById('btnGuardar').classList.replace('bg-blue-600', 'bg-slate-900');
                 } else {
                     await addDoc(colRef, {
-                        monto,
-                        nota,
-                        tipo: tipoSeleccionado,
-                        usuario: user,
+                        monto, nota, tipo: tipoSeleccionado, usuario: user,
                         fecha: new Date().toISOString().split('T')[0],
                         creadoEn: Date.now()
                     });
@@ -109,13 +108,7 @@
                 document.getElementById('monto').value = '';
                 document.getElementById('nota').value = '';
             } catch (e) {
-                alert("Error al guardar: " + e.message);
-            }
-        };
-
-        window.eliminarRegistro = async (id) => {
-            if (confirm("¿Eliminar este registro de la nube?")) {
-                await deleteDoc(doc(db, "movimientos", id));
+                alert("Error: " + e.message);
             }
         };
 
@@ -127,23 +120,48 @@
             window.setTipo(reg.tipo);
             editandoId = id;
             document.getElementById('btnGuardar').innerText = "Actualizar Registro";
+            document.getElementById('btnGuardar').classList.replace('bg-slate-900', 'bg-blue-600');
             window.scrollTo({ top: 0, behavior: 'smooth' });
         };
 
-        window.exportarExcel = () => {
-            const ws = XLSX.utils.json_to_sheet(registros);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Contabilidad_Cloud");
-            XLSX.writeFile(wb, "Reporte_General.xlsx");
+        window.eliminarRegistro = async (id) => {
+            if (confirm("¿Eliminar este registro de la nube?")) {
+                await deleteDoc(doc(db, "movimientos", id));
+            }
         };
 
-        // --- ESCUCHA DE DATOS EN TIEMPO REAL ---
+        window.borrarTodoNube = async () => {
+            const pass = prompt("Ingresa el código de seguridad para borrar TODO de la nube:");
+            if (pass === PIN_SEGURIDAD) {
+                if (confirm("¿Estás 100% seguro? Se borrarán los datos de todos los teléfonos.")) {
+                    const querySnapshot = await getDocs(colRef);
+                    const batch = writeBatch(db);
+                    querySnapshot.forEach((doc) => {
+                        batch.delete(doc.ref);
+                    });
+                    await batch.commit();
+                    alert("Base de datos limpiada.");
+                }
+            } else if (pass !== null) {
+                alert("Código incorrecto.");
+            }
+        };
+
+        window.exportarExcel = () => {
+            const ws = XLSX.utils.json_to_sheet(registros.map(r => ({
+                Fecha: r.fecha, Tipo: r.tipo, Concepto: r.nota, Monto: r.monto, Usuario: r.usuario
+            })));
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Contabilidad");
+            XLSX.writeFile(wb, "Reporte_Cloud.xlsx");
+        };
+
         const q = query(colRef, orderBy("creadoEn", "desc"));
         onSnapshot(q, (snapshot) => {
             registros = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             document.getElementById('status').innerText = "⚡ Sincronizado";
-            document.getElementById('status').className = "text-[10px] text-emerald-500 font-bold uppercase";
-            actualizarUI();
+            document.getElementById('status').className = "text-[10px] text-emerald-500 font-bold uppercase text-center";
+            window.actualizarUI();
         });
 
         window.actualizarUI = () => {
@@ -161,12 +179,12 @@
                 card.innerHTML = `
                     <div class="flex-1">
                         <p class="font-bold text-slate-700 text-sm">${r.nota}</p>
-                        <p class="text-[10px] text-slate-400 font-medium">${r.fecha} • por: <b>${r.usuario}</b></p>
+                        <p class="text-[10px] text-slate-400 font-medium">${r.fecha} • <b>${r.usuario}</b></p>
                     </div>
                     <div class="text-right flex items-center gap-3">
                         <p class="font-black ${r.tipo === 'Venta' ? 'text-emerald-600' : 'text-slate-800'}">$${r.monto.toFixed(2)}</p>
                         <div class="flex flex-col gap-1">
-                            <button onclick="editarRegistro('${r.id}')" class="text-blue-500 text-[10px] font-bold">Edit</button>
+                            <button onclick="editarRegistro('${r.id}')" class="text-blue-500 text-[10px] font-bold bg-blue-50 px-2 py-1 rounded">Edit</button>
                             <button onclick="eliminarRegistro('${r.id}')" class="text-red-400 text-[10px] font-bold">Borrar</button>
                         </div>
                     </div>`;
