@@ -3,14 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contabilidad Local Pro</title>
+    <title>Contabilidad Cloud Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body class="bg-slate-50 p-4 font-sans text-slate-800">
 
     <header class="text-center mb-6">
-        <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Mi Contabilidad SPT#2</h1>
+        <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Contabilidad Compartida</h1>
+        <div id="status" class="text-[10px] text-orange-500 font-bold uppercase">Conectando a la nube...</div>
     </header>
 
     <div class="grid grid-cols-2 gap-4 mb-6">
@@ -31,10 +32,11 @@
         </div>
         
         <div class="space-y-4">
-            <input type="number" id="monto" placeholder="0.00" step="0.01" class="w-full p-4 bg-slate-100 rounded-xl text-xl font-bold outline-none focus:ring-2 focus:ring-slate-400">
+            <input type="text" id="usuario" placeholder="Tu nombre (ej. Frank)" class="w-full p-3 bg-slate-50 border rounded-xl text-sm outline-none">
+            <input type="number" id="monto" placeholder="Monto exacto ($)" step="0.01" class="w-full p-4 bg-slate-100 rounded-xl text-xl font-bold outline-none focus:ring-2 focus:ring-slate-400">
             <input type="text" id="nota" placeholder="Concepto o proveedor..." class="w-full p-4 bg-slate-100 rounded-xl outline-none focus:ring-2 focus:ring-slate-400">
             <button id="btnGuardar" onclick="guardarRegistro()" class="w-full bg-slate-900 text-white py-4 rounded-xl font-bold text-lg active:scale-95 transition-transform">
-                Registrar Movimiento
+                Registrar en la Nube
             </button>
         </div>
     </div>
@@ -46,91 +48,111 @@
                 📊 EXCEL
             </button>
         </div>
-        <button onclick="borrarTodoSeguro()" class="w-full mt-3 text-[10px] text-red-400 font-bold uppercase tracking-widest">Limpiar base de datos</button>
     </div>
 
     <div id="listaContenedor" class="space-y-3 pb-10"></div>
 
-    <script>
-        let tipoSeleccionado = 'Venta';
-        let registros = JSON.parse(localStorage.getItem('conta_facil_v3')) || [];
-        let editandoId = null;
-        const PIN_SEGURIDAD = "1998"; // AQUÍ PUEDES CAMBIAR TU CÓDIGO
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-        function setTipo(tipo) {
+        const firebaseConfig = {
+            apiKey: "AIzaSyAqfr2LvgnEN9-ZOaJwMcqIaqCOEaSfD8o",
+            authDomain: "micontabilidad-a7b2d.firebaseapp.com",
+            projectId: "micontabilidad-a7b2d",
+            storageBucket: "micontabilidad-a7b2d.firebasestorage.app",
+            messagingSenderId: "177372990974",
+            appId: "1:177372990974:web:7b62fbded941a9a4e884af"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const colRef = collection(db, "movimientos");
+
+        let registros = [];
+        let tipoSeleccionado = 'Venta';
+        let editandoId = null;
+
+        // --- FUNCIONES ACCESIBLES DESDE EL HTML ---
+        window.setTipo = (tipo) => {
             tipoSeleccionado = tipo;
             const bVenta = document.getElementById('btnVenta');
             const bCompra = document.getElementById('btnCompra');
-            
-            if (tipo === 'Venta') {
-                bVenta.className = 'flex-1 p-3 rounded-xl bg-emerald-500 text-white font-bold shadow-md text-sm';
-                bCompra.className = 'flex-1 p-3 rounded-xl bg-slate-200 text-slate-600 font-bold text-sm';
-            } else {
-                bVenta.className = 'flex-1 p-3 rounded-xl bg-slate-200 text-slate-600 font-bold text-sm';
-                bCompra.className = 'flex-1 p-3 rounded-xl bg-slate-800 text-white font-bold shadow-md text-sm';
+            bVenta.className = tipo === 'Venta' ? 'flex-1 p-3 rounded-xl bg-emerald-500 text-white font-bold shadow-md text-sm' : 'flex-1 p-3 rounded-xl bg-slate-200 text-slate-600 font-bold text-sm';
+            bCompra.className = tipo === 'Compra' ? 'flex-1 p-3 rounded-xl bg-slate-800 text-white font-bold shadow-md text-sm' : 'flex-1 p-3 rounded-xl bg-slate-200 text-slate-600 font-bold text-sm';
+        };
+
+        window.guardarRegistro = async () => {
+            const monto = parseFloat(document.getElementById('monto').value);
+            const nota = document.getElementById('nota').value;
+            const user = document.getElementById('usuario').value || "Anónimo";
+
+            if (!monto) return alert("Ingresa un monto");
+
+            try {
+                if (editandoId) {
+                    await updateDoc(doc(db, "movimientos", editandoId), {
+                        monto, nota, tipo: tipoSeleccionado, usuario: user
+                    });
+                    editandoId = null;
+                    document.getElementById('btnGuardar').innerText = "Registrar en la Nube";
+                } else {
+                    await addDoc(colRef, {
+                        monto,
+                        nota,
+                        tipo: tipoSeleccionado,
+                        usuario: user,
+                        fecha: new Date().toISOString().split('T')[0],
+                        creadoEn: Date.now()
+                    });
+                }
+                document.getElementById('monto').value = '';
+                document.getElementById('nota').value = '';
+            } catch (e) {
+                alert("Error al guardar: " + e.message);
             }
-        }
+        };
 
-        function guardarRegistro() {
-            const montoInput = document.getElementById('monto');
-            const notaInput = document.getElementById('nota');
-            const monto = parseFloat(montoInput.value);
-            const nota = notaInput.value || (tipoSeleccionado === 'Venta' ? 'Venta' : 'Compra');
-
-            if (!monto || monto <= 0) return alert("Ingresa un monto válido.");
-
-            if (editandoId) {
-                const index = registros.findIndex(r => r.id === editandoId);
-                registros[index].monto = monto;
-                registros[index].nota = nota;
-                registros[index].tipo = tipoSeleccionado;
-                editandoId = null;
-                document.getElementById('btnGuardar').innerText = "Registrar Movimiento";
-                document.getElementById('btnGuardar').classList.replace('bg-blue-600', 'bg-slate-900');
-            } else {
-                registros.unshift({
-                    id: Date.now(),
-                    tipo: tipoSeleccionado,
-                    monto: monto,
-                    nota: nota,
-                    fecha: new Date().toISOString().split('T')[0]
-                });
+        window.eliminarRegistro = async (id) => {
+            if (confirm("¿Eliminar este registro de la nube?")) {
+                await deleteDoc(doc(db, "movimientos", id));
             }
+        };
 
-            localStorage.setItem('conta_facil_v3', JSON.stringify(registros));
-            montoInput.value = '';
-            notaInput.value = '';
-            actualizarUI();
-        }
-
-        function editarRegistro(id) {
+        window.editarRegistro = (id) => {
             const reg = registros.find(r => r.id === id);
             document.getElementById('monto').value = reg.monto;
             document.getElementById('nota').value = reg.nota;
-            setTipo(reg.tipo);
+            document.getElementById('usuario').value = reg.usuario;
+            window.setTipo(reg.tipo);
             editandoId = id;
             document.getElementById('btnGuardar').innerText = "Actualizar Registro";
-            document.getElementById('btnGuardar').classList.replace('bg-slate-900', 'bg-blue-600');
             window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
+        };
 
-        function eliminarRegistro(id) {
-            if (confirm("¿Eliminar este movimiento?")) {
-                registros = registros.filter(r => r.id !== id);
-                localStorage.setItem('conta_facil_v3', JSON.stringify(registros));
-                actualizarUI();
-            }
-        }
+        window.exportarExcel = () => {
+            const ws = XLSX.utils.json_to_sheet(registros);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Contabilidad_Cloud");
+            XLSX.writeFile(wb, "Reporte_General.xlsx");
+        };
 
-        function actualizarUI() {
+        // --- ESCUCHA DE DATOS EN TIEMPO REAL ---
+        const q = query(colRef, orderBy("creadoEn", "desc"));
+        onSnapshot(q, (snapshot) => {
+            registros = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            document.getElementById('status').innerText = "⚡ Sincronizado";
+            document.getElementById('status').className = "text-[10px] text-emerald-500 font-bold uppercase";
+            actualizarUI();
+        });
+
+        window.actualizarUI = () => {
             const lista = document.getElementById('listaContenedor');
             const fFecha = document.getElementById('fechaFiltro').value;
             lista.innerHTML = '';
             let vTotal = 0, cTotal = 0;
 
-            const filtrados = registros.filter(r => !fFecha || r.fecha === fFecha);
-
-            filtrados.forEach(r => {
+            registros.filter(r => !fFecha || r.fecha === fFecha).forEach(r => {
                 if (r.tipo === 'Venta') vTotal += r.monto;
                 else cTotal += r.monto;
 
@@ -139,47 +161,21 @@
                 card.innerHTML = `
                     <div class="flex-1">
                         <p class="font-bold text-slate-700 text-sm">${r.nota}</p>
-                        <p class="text-[10px] text-slate-400 font-medium">${r.fecha} • <span class="uppercase">${r.tipo}</span></p>
+                        <p class="text-[10px] text-slate-400 font-medium">${r.fecha} • por: <b>${r.usuario}</b></p>
                     </div>
                     <div class="text-right flex items-center gap-3">
-                        <div>
-                            <p class="font-black ${r.tipo === 'Venta' ? 'text-emerald-600' : 'text-slate-800'}">$${r.monto.toFixed(2)}</p>
-                        </div>
+                        <p class="font-black ${r.tipo === 'Venta' ? 'text-emerald-600' : 'text-slate-800'}">$${r.monto.toFixed(2)}</p>
                         <div class="flex flex-col gap-1">
-                            <button onclick="editarRegistro(${r.id})" class="text-blue-500 text-xs font-bold bg-blue-50 px-2 py-1 rounded">Edit</button>
-                            <button onclick="eliminarRegistro(${r.id})" class="text-red-400 text-[10px] font-bold">Borrar</button>
+                            <button onclick="editarRegistro('${r.id}')" class="text-blue-500 text-[10px] font-bold">Edit</button>
+                            <button onclick="eliminarRegistro('${r.id}')" class="text-red-400 text-[10px] font-bold">Borrar</button>
                         </div>
-                    </div>
-                `;
+                    </div>`;
                 lista.appendChild(card);
             });
 
             document.getElementById('totalVentas').innerText = `$${vTotal.toFixed(2)}`;
             document.getElementById('totalCompras').innerText = `$${cTotal.toFixed(2)}`;
-        }
-
-        function exportarExcel() {
-            if (registros.length === 0) return alert("No hay datos.");
-            const ws = XLSX.utils.json_to_sheet(registros.map(r => ({ Fecha: r.fecha, Tipo: r.tipo, Concepto: r.nota, Monto: r.monto })));
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Contabilidad");
-            XLSX.writeFile(wb, `Reporte_Conta.xlsx`);
-        }
-
-        function borrarTodoSeguro() {
-            const pass = prompt("Ingresa el código de seguridad para borrar TODO:");
-            if (pass === PIN_SEGURIDAD) {
-                if (confirm("¿Estás seguro? Se perderán todos los datos del teléfono.")) {
-                    registros = [];
-                    localStorage.removeItem('conta_facil_v3');
-                    actualizarUI();
-                }
-            } else if (pass !== null) {
-                alert("Código incorrecto, parce.");
-            }
-        }
-
-        actualizarUI();
+        };
     </script>
 </body>
 </html>
